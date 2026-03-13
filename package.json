@@ -1,0 +1,123 @@
+{
+  "name": "comment",
+  "displayName": "Comment",
+  "description": "Inline comments for markdown files",
+  "version": "0.1.0",
+  "publisher": "erayalan",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/erayalan/comment"
+  },
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:comment-file-tree",
+    "onView:comment-revisions-tree",
+    "onLanguage:markdown",
+    "onCommand:comment.copyAndSave",
+    "onCommand:comment.deleteAllComments"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "comment",
+          "title": "Comment",
+          "icon": "media/comment.svg"
+        }
+      ]
+    },
+    "views": {
+      "comment": [
+        {
+          "id": "comment-file-tree",
+          "name": "Markdown Files",
+          "when": "workspaceFolderCount > 0"
+        },
+        {
+          "id": "comment-revisions-tree",
+          "name": "Revision History",
+          "when": "workspaceFolderCount > 0"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "comment.openPreview",
+        "title": "Comment: Open Preview"
+      },
+      {
+        "command": "comment.copyAndSave",
+        "title": "Copy & Save Comments",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "comment.deleteAllComments",
+        "title": "Delete All Comments",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "comment.deleteRevision",
+        "title": "Delete Revision",
+        "icon": "$(trash)"
+      }
+    ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "comment.deleteRevision",
+          "when": "view == comment-revisions-tree && viewItem == revisionItem",
+          "group": "inline"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "comment.copyAndSave",
+          "when": "view == comment-file-tree",
+          "group": "navigation@1"
+        },
+        {
+          "command": "comment.deleteAllComments",
+          "when": "view == comment-file-tree",
+          "group": "navigation@2"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "test:unit": "tsc -p tsconfig.test.json --noEmit false && mocha 'out/tests/unit/**/*.test.js'",
+    "test:integration": "tsc -p tsconfig.test.json && node out/tests/integration/runTest.js",
+    "test": "npm run test:unit && npm run test:integration",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "dependencies": {
+    "markdown-it": "^14.0.0",
+    "node-html-parser": "^6.0.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.0.0",
+    "@types/mocha": "^10.0.0",
+    "@types/node": "^18.0.0",
+    "@types/uuid": "^9.0.0",
+    "@types/vscode": "^1.74.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@vscode/test-electron": "^2.0.0",
+    "esbuild": "^0.20.0",
+    "eslint": "^8.0.0",
+    "glob": "^10.5.0",
+    "mocha": "^10.0.0",
+    "ts-node": "^10.0.0",
+    "typescript": "^5.0.0"
+  }
+}

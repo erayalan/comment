@@ -1,0 +1,17 @@
+src/
+specs/
+tests/
+.specify/
+.claude/
+node_modules/
+esbuild.js
+*.test.ts
+tsconfig.json
+tsconfig.test.json
+.eslintrc.json
+.gitignore
+CLAUDE.md
+out/**
+!out/extension.js
+!out/webview/main.js
+!out/webview/styles.css
