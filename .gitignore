@@ -7,3 +7,5 @@ out/
 Thumbs.db
 *.tmp
 *.swp
+.comments/
+.vscode-test/
