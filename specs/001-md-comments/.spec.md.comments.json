@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "comments": [
+    {
+      "id": "d27c5315-b2f9-417d-bcef-2b490c2c1b6c",
+      "anchor": {
+        "text": "Feature Specificat",
+        "sourceOffset": 2,
+        "contextBefore": "# ",
+        "contextAfter": "ion: Inline Markdown Comment & Claude Re"
+      },
+      "body": "fsq",
+      "createdAt": "2026-03-13T18:36:25.872Z"
+    },
+    {
+      "id": "1d3aa67b-efc3-43f6-9862-4186f0b62676",
+      "anchor": {
+        "text": "2026-02-26 Status: Dra",
+        "sourceOffset": 117,
+        "contextBefore": "ranch**: `001-md-comments`\n**Created**: ",
+        "contextAfter": "ft\n**Input**: User description: \"VS Code"
+      },
+      "body": "test",
+      "createdAt": "2026-03-13T18:53:11.454Z"
+    }
+  ]
+}
