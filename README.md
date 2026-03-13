@@ -6,6 +6,16 @@ Highlight any text, type your note, and it sticks to that passage — without to
 
 ---
 
+## Install
+
+```bash
+curl -L https://github.com/erayalan/comment/raw/main/comment-0.1.0.vsix -o /tmp/comment.vsix && code --install-extension /tmp/comment.vsix
+```
+
+Works with VS Code, Cursor, Kiro, Windsurf, and any other VS Code-based IDE. Replace `code` with `cursor`, `windsurf`, etc. as needed.
+
+---
+
 ## Features
 
 ### Highlight text → type a comment
