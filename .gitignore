@@ -1,6 +1,6 @@
 node_modules/
 out/
-*.vsix
+# *.vsix
 *.log
 .env*
 .DS_Store
