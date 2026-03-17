@@ -618,21 +618,31 @@ function _findInStrippedSource(
   let normalized = '';
   let prevWasSpace = false;
   let i = 0;
+  let atLineStart = true;
   while (i < source.length) {
+    // Skip block-level markers at the start of a line: # (headings), > (blockquotes)
+    if (atLineStart && (source[i] === '#' || source[i] === '>')) {
+      while (i < source.length && (source[i] === '#' || source[i] === '>' || source[i] === ' ' || source[i] === '\t')) i++;
+      atLineStart = false;
+      continue;
+    }
     // Skip inline markdown markers: *, **, ***, `, ``, ```, ~~
     if (source[i] === '*' || source[i] === '`') {
       const ch = source[i];
       while (i < source.length && source[i] === ch) i++;
       prevWasSpace = false;
+      atLineStart = false;
       continue;
     }
     if (source[i] === '~' && source[i + 1] === '~') {
       i += 2;
       prevWasSpace = false;
+      atLineStart = false;
       continue;
     }
     // Collapse any whitespace (space, tab, \r, \n) to a single space.
     if (source[i] === ' ' || source[i] === '\t' || source[i] === '\r' || source[i] === '\n') {
+      if (source[i] === '\n') atLineStart = true;
       if (!prevWasSpace && normalized.length > 0) {
         posMap.push(i);
         normalized += ' ';
@@ -644,6 +654,7 @@ function _findInStrippedSource(
     posMap.push(i);
     normalized += source[i];
     prevWasSpace = false;
+    atLineStart = false;
     i++;
   }
 
