@@ -8,6 +8,7 @@ import type { Comment, CommentAnchor } from '../core/types.js';
 import { createComment, deleteComment, updateComment } from '../core/comment.js';
 import { relocateAnchor } from '../core/anchor.js';
 import { readSidecar, writeSidecar, getSidecarPath } from '../core/sidecar.js';
+import { findInStrippedSource } from '../core/stripMarkdown.js';
 
 // ── Module-level active file tracking ────────────────────────────────────────
 // Exposed via getter for src/host/commands.ts (see Decision 9 in research.md).
@@ -86,14 +87,14 @@ export function injectHighlights(
 
     const text = comment.anchor.text;
 
-    // Count occurrences of text in source BEFORE `offset` → occurrence index N
+    // Count occurrences of text in stripped source BEFORE `offset` → occurrence index N.
+    // Uses findInStrippedSource so anchor.text (rendered, no inline markers) correctly
+    // matches source spans that contain backticks, asterisks, etc.
     let n = 0;
-    let from = 0;
-    while (from < offset) {
-      const found = source.indexOf(text, from);
-      if (found === -1 || found >= offset) break;
+    for (let sn = 0; ; sn++) {
+      const hit = findInStrippedSource(source, text, sn);
+      if (hit === null || hit.offset >= offset) break;
       n++;
-      from = found + 1;
     }
 
     injections.push({ offset, n, encodedText: _htmlEncode(text), id: comment.id });
@@ -112,10 +113,31 @@ export function injectHighlights(
   return result;
 }
 
+// ── Inline-tag helpers for cross-tag text matching ───────────────────────────
+
 /**
- * Walk `html` as a character stream, skipping content inside `<…>` tags, and
- * replace the `n`-th (0-based) occurrence of `encodedText` in text content with
- * a `<mark>` element.
+ * HTML elements that are transparent to text matching: text inside or around
+ * them is considered a single logical run for highlight injection.
+ */
+const _INLINE_TAGS = new Set([
+  'a', 'abbr', 'b', 'bdi', 'cite', 'code', 'data', 'del', 'dfn', 'em',
+  'i', 'ins', 'kbd', 'mark', 'q', 's', 'samp', 'small', 'span', 'strong',
+  'sub', 'sup', 'time', 'u', 'var', 'wbr',
+]);
+
+function _htmlTagName(tag: string): string {
+  const m = tag.match(/^<\/?([a-zA-Z][a-zA-Z0-9]*)/);
+  return m ? m[1].toLowerCase() : '';
+}
+
+/**
+ * Walk `html` as a token stream (text nodes + tags), matching `encodedText`
+ * across inline-tag boundaries, and replace the `n`-th (0-based) occurrence
+ * with a `<mark>` element.
+ *
+ * This handles the case where the selected text straddles inline elements
+ * such as `<code>`, `<em>`, etc. — e.g. the rendered form of
+ * ``1. `show_application_link` — note`` spans a `<code>` tag in HTML.
  */
 function _replaceNthTextOccurrence(
   html: string,
@@ -123,55 +145,122 @@ function _replaceNthTextOccurrence(
   n: number,
   commentId: string,
 ): string {
-  let count = 0;
-  let i = 0;
-  let result = '';
+  // ── 1. Tokenize ───────────────────────────────────────────────────────────
+  interface TextToken { type: 'text'; raw: string }
+  interface TagToken  { type: 'tag';  raw: string; isInline: boolean }
+  type Token = TextToken | TagToken;
 
+  const tokens: Token[] = [];
+  let i = 0;
   while (i < html.length) {
     if (html[i] === '<') {
-      // Inside a tag — copy verbatim to end of '>'
       const end = html.indexOf('>', i);
       if (end === -1) {
-        result += html.slice(i);
+        // Unclosed tag — treat rest as text
+        tokens.push({ type: 'text', raw: html.slice(i) });
         break;
       }
-      result += html.slice(i, end + 1);
+      const raw = html.slice(i, end + 1);
+      tokens.push({ type: 'tag', raw, isInline: _INLINE_TAGS.has(_htmlTagName(raw)) });
       i = end + 1;
     } else {
-      // Text content — scan until next '<'
-      const tagStart = html.indexOf('<', i);
-      const chunk = tagStart === -1 ? html.slice(i) : html.slice(i, tagStart);
-
-      let pos = 0;
-      let chunkOut = '';
-      while (pos < chunk.length) {
-        const idx = chunk.indexOf(encodedText, pos);
-        if (idx === -1) {
-          chunkOut += chunk.slice(pos);
-          break;
-        }
-        if (count === n) {
-          // This is the target occurrence — wrap it
-          const rawMatch = chunk.slice(idx, idx + encodedText.length);
-          chunkOut +=
-            chunk.slice(pos, idx) +
-            `<mark class="comment-anchor" data-comment-id="${commentId}">${rawMatch}</mark>` +
-            chunk.slice(idx + encodedText.length);
-          pos = chunk.length; // rest already included
-          count++;
-          break;
-        }
-        // Not the target — copy and continue
-        chunkOut += chunk.slice(pos, idx + encodedText.length);
-        pos = idx + encodedText.length;
-        count++;
-      }
-      result += chunkOut;
-      i = tagStart === -1 ? html.length : tagStart;
+      const end = html.indexOf('<', i);
+      const endPos = end === -1 ? html.length : end;
+      tokens.push({ type: 'text', raw: html.slice(i, endPos) });
+      i = endPos;
     }
   }
 
-  return result;
+  // ── 2. Scan runs, find nth occurrence, inject mark ────────────────────────
+  // A "run" = consecutive text tokens separated only by inline tags. Block tags
+  // end the run. We build a virtual concatenation of text in the run and search
+  // for encodedText across token boundaries.
+
+  let count = 0;
+  let ti = 0; // index of first token in current run
+
+  while (ti < tokens.length) {
+    // Collect run starting at ti
+    let ri = ti;
+    let virtualText = '';
+    // posMap[vi] = { tokenIndex, charOffset } — maps virtual text pos → token char
+    const posMap: Array<{ tokenIndex: number; charOffset: number }> = [];
+
+    while (ri < tokens.length) {
+      const tok = tokens[ri];
+      if (tok.type === 'text') {
+        for (let ci = 0; ci < tok.raw.length; ci++) {
+          posMap.push({ tokenIndex: ri, charOffset: ci });
+          virtualText += tok.raw[ci];
+        }
+        ri++;
+      } else if (tok.isInline) {
+        ri++; // transparent: advances run without adding to virtualText
+      } else {
+        break; // block tag ends the run
+      }
+    }
+
+    // Search virtualText for encodedText
+    let from = 0;
+    while (virtualText.length - from >= encodedText.length) {
+      const idx = virtualText.indexOf(encodedText, from);
+      if (idx === -1) break;
+
+      if (count === n) {
+        // Found the target occurrence — inject <mark> at [idx, idx+len-1]
+        const startMap = posMap[idx];
+        const endMap   = posMap[idx + encodedText.length - 1];
+
+        let out = '';
+        // Tokens before this run
+        for (let t = 0; t < ti; t++) out += tokens[t].raw;
+
+        // Run tokens with mark injected
+        for (const { ti: t, token } of tokens
+          .slice(ti, ri)
+          .map((token, offset) => ({ ti: ti + offset, token }))
+        ) {
+          if (t < startMap.tokenIndex || t > endMap.tokenIndex) {
+            out += token.raw;
+          } else if (t === startMap.tokenIndex && t === endMap.tokenIndex) {
+            // Match is entirely within this text token
+            out += token.raw.slice(0, startMap.charOffset);
+            out += `<mark class="comment-anchor" data-comment-id="${commentId}">`;
+            out += token.raw.slice(startMap.charOffset, endMap.charOffset + 1);
+            out += '</mark>';
+            out += token.raw.slice(endMap.charOffset + 1);
+          } else if (t === startMap.tokenIndex) {
+            // Match starts here
+            out += token.raw.slice(0, startMap.charOffset);
+            out += `<mark class="comment-anchor" data-comment-id="${commentId}">`;
+            out += token.raw.slice(startMap.charOffset);
+          } else if (t === endMap.tokenIndex) {
+            // Match ends here
+            out += token.raw.slice(0, endMap.charOffset + 1);
+            out += '</mark>';
+            out += token.raw.slice(endMap.charOffset + 1);
+          } else {
+            // Middle of match span (inline tag or text token entirely inside span)
+            out += token.raw;
+          }
+        }
+
+        // Tokens after run
+        for (let t = ri; t < tokens.length; t++) out += tokens[t].raw;
+
+        return out;
+      }
+
+      count++;
+      from = idx + 1;
+    }
+
+    // Advance past this run (and the block tag that ended it, if any)
+    ti = ri >= tokens.length ? ri : ri + 1;
+  }
+
+  return html; // no match found — return unchanged
 }
 
 function _htmlEncode(str: string): string {
@@ -338,7 +427,7 @@ export class CommentPreviewPanel {
 
         if (sourceOffset === -1) {
           // Fallback 1: strip inline markdown markers + normalize whitespace (handles soft line-breaks).
-          const fuzzy = _findInStrippedSource(source, selectedText, occurrenceIndex);
+          const fuzzy = findInStrippedSource(source, selectedText, occurrenceIndex);
           console.log('[comment] host fuzzy search', fuzzy ? { offset: fuzzy.offset, sourceText: fuzzy.sourceText } : 'null');
           if (fuzzy !== null) {
             sourceOffset = fuzzy.offset;
@@ -356,7 +445,7 @@ export class CommentPreviewPanel {
             if (sourceOffset !== -1) sourceSpanLen = reversedText.length;
 
             if (sourceOffset === -1) {
-              const fuzzy2 = _findInStrippedSource(source, reversedText, occurrenceIndex);
+              const fuzzy2 = findInStrippedSource(source, reversedText, occurrenceIndex);
               console.log('[comment] host typographer+fuzzy search', fuzzy2 ? { offset: fuzzy2.offset, sourceText: fuzzy2.sourceText } : 'null');
               if (fuzzy2 !== null) {
                 sourceOffset = fuzzy2.offset;
@@ -593,91 +682,3 @@ function _findNthOccurrence(source: string, text: string, n: number): number {
   }
 }
 
-/**
- * Try to match `text` (rendered plain text) in `source` (raw markdown) by
- * building a normalized copy of the source that:
- *   - removes inline formatting markers (*, **, ***, `, ``, ```, ~~)
- *   - collapses all whitespace runs (including \n from soft line-breaks) to a
- *     single space — mirroring what markdown renderers do in paragraph text
- *
- * Both normalizations happen in a single pass with a posMap that maps each
- * character in the normalized string back to its position in the original source.
- * `text` is whitespace-normalized the same way before searching.
- *
- * Returns `{ offset, sourceText }` where `sourceText` is the verbatim source
- * span (including any embedded markers/newlines) that renders to `text`, or
- * `null` if no match is found.
- */
-function _findInStrippedSource(
-  source: string,
-  text: string,
-  n: number,
-): { offset: number; sourceText: string } | null {
-  // Single-pass: build normalized source + posMap[i] = source index of normalized[i].
-  const posMap: number[] = [];
-  let normalized = '';
-  let prevWasSpace = false;
-  let i = 0;
-  let atLineStart = true;
-  while (i < source.length) {
-    // Skip block-level markers at the start of a line: # (headings), > (blockquotes)
-    if (atLineStart && (source[i] === '#' || source[i] === '>')) {
-      while (i < source.length && (source[i] === '#' || source[i] === '>' || source[i] === ' ' || source[i] === '\t')) i++;
-      atLineStart = false;
-      continue;
-    }
-    // Skip inline markdown markers: *, **, ***, `, ``, ```, ~~
-    if (source[i] === '*' || source[i] === '`') {
-      const ch = source[i];
-      while (i < source.length && source[i] === ch) i++;
-      prevWasSpace = false;
-      atLineStart = false;
-      continue;
-    }
-    if (source[i] === '~' && source[i + 1] === '~') {
-      i += 2;
-      prevWasSpace = false;
-      atLineStart = false;
-      continue;
-    }
-    // Collapse any whitespace (space, tab, \r, \n) to a single space.
-    if (source[i] === ' ' || source[i] === '\t' || source[i] === '\r' || source[i] === '\n') {
-      if (source[i] === '\n') atLineStart = true;
-      if (!prevWasSpace && normalized.length > 0) {
-        posMap.push(i);
-        normalized += ' ';
-        prevWasSpace = true;
-      }
-      i++;
-      continue;
-    }
-    posMap.push(i);
-    normalized += source[i];
-    prevWasSpace = false;
-    atLineStart = false;
-    i++;
-  }
-
-  // Normalize the search text identically.
-  const normalizedText = text.replace(/\s+/g, ' ').trim();
-  if (!normalizedText) return null;
-
-  // Find the nth occurrence of normalizedText in the normalized source.
-  let count = 0;
-  let from = 0;
-  while (true) {
-    const idx = normalized.indexOf(normalizedText, from);
-    if (idx === -1) return null;
-    if (count === n) {
-      const srcStart = posMap[idx];
-      const lastNormIdx = idx + normalizedText.length - 1;
-      // posMap[lastNormIdx + 1] is where the next non-stripped char starts in source,
-      // so slicing up to that point captures any trailing markers/newlines in the span.
-      const srcEnd =
-        lastNormIdx + 1 < posMap.length ? posMap[lastNormIdx + 1] : source.length;
-      return { offset: srcStart, sourceText: source.slice(srcStart, srcEnd) };
-    }
-    count++;
-    from = idx + 1;
-  }
-}

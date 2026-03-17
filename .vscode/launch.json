@@ -6,7 +6,8 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}"
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "/Users/eray.alan/Documents/Magic-Window-6"
       ],
       "outFiles": [
         "${workspaceFolder}/out/**/*.js"
