@@ -32,7 +32,7 @@ export async function copyAndSave(): Promise<void> {
   const workspaceRoot = workspaceFolders[0].uri.fsPath;
 
   // Find all sidecar files in the workspace
-  const sidecarUris = await vscode.workspace.findFiles('**/.*.comments.json');
+  const sidecarUris = await vscode.workspace.findFiles('**/.*.comments.json', null);
 
   // For each sidecar, read comments only (no .md file content needed)
   const fileInputs = await Promise.all(
@@ -105,7 +105,7 @@ export async function deleteAllComments(): Promise<void> {
     return;
   }
 
-  const sidecarUris = await vscode.workspace.findFiles('**/.*.comments.json');
+  const sidecarUris = await vscode.workspace.findFiles('**/.*.comments.json', null);
 
   await Promise.all(sidecarUris.map((uri) => clearSidecar(uri.fsPath)));
 

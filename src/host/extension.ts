@@ -12,11 +12,19 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const workspaceRoot = workspaceFolders[0].uri.fsPath;
 
-  // Hide CommentRevisions/ from Explorer via workspace files.exclude
+  // Hide CommentRevisions/ and sidecar JSON files from Explorer via workspace files.exclude
   const filesConfig = vscode.workspace.getConfiguration('files');
   const exclude = filesConfig.get<Record<string, boolean>>('exclude') ?? {};
+  let excludeChanged = false;
   if (!exclude['CommentRevisions/']) {
     exclude['CommentRevisions/'] = true;
+    excludeChanged = true;
+  }
+  if (!exclude['**/.*.comments.json']) {
+    exclude['**/.*.comments.json'] = true;
+    excludeChanged = true;
+  }
+  if (excludeChanged) {
     void filesConfig.update('exclude', exclude, vscode.ConfigurationTarget.Workspace);
   }
 
