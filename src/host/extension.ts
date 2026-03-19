@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { copyAndSave, deleteAllComments, deleteRevision } from './commands.js';
+import { copyAndSave, copyFileComments, deleteAllComments, deleteFileComments, deleteRevision } from './commands.js';
 import { MarkdownFileTree } from './fileTree.js';
 import { RevisionTreeProvider } from './revisionsTree.js';
 import { CommentPreviewPanel } from './previewPanel.js';
@@ -62,6 +62,20 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('comment.deleteAllComments', () => {
       void deleteAllComments();
+    }),
+  );
+
+  // comment.copyFileComments — copy & save comments for a single file
+  context.subscriptions.push(
+    vscode.commands.registerCommand('comment.copyFileComments', (item) => {
+      void copyFileComments(item);
+    }),
+  );
+
+  // comment.deleteFileComments — confirm then clear a single file's sidecar
+  context.subscriptions.push(
+    vscode.commands.registerCommand('comment.deleteFileComments', (item) => {
+      void deleteFileComments(item);
     }),
   );
 

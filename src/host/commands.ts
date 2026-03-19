@@ -9,7 +9,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { assembleReviewPrompt } from '../core/prompt.js';
 import { writeRevisionFile } from '../core/revision.js';
-import { clearSidecar, readSidecar } from '../core/sidecar.js';
+import { clearSidecar, getSidecarPath, readSidecar } from '../core/sidecar.js';
 import { CommentPreviewPanel } from './previewPanel.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -90,6 +90,71 @@ export async function deleteRevision(item: { filePath: string }): Promise<void> 
   }
 
   await fs.promises.unlink(item.filePath);
+}
+
+// ── comment.copyFileComments ──────────────────────────────────────────────────
+
+export async function copyFileComments(item: { resourceUri: vscode.Uri }): Promise<void> {
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  if (!workspaceFolders || workspaceFolders.length === 0) {
+    vscode.window.showInformationMessage('No workspace folder open.');
+    return;
+  }
+
+  const workspaceRoot = workspaceFolders[0].uri.fsPath;
+  const mdFilePath = item.resourceUri.fsPath;
+  const sidecarPath = getSidecarPath(mdFilePath);
+  const sidecar = await readSidecar(sidecarPath);
+
+  if (sidecar.comments.length === 0) {
+    vscode.window.showInformationMessage('No comments found in this file.');
+    return;
+  }
+
+  const prompt = assembleReviewPrompt([
+    { filename: path.basename(mdFilePath), comments: sidecar.comments },
+  ]);
+
+  const revisionsDir = path.join(workspaceRoot, 'CommentRevisions');
+  let revisionPath: string;
+  try {
+    const result = await writeRevisionFile(revisionsDir, prompt);
+    revisionPath = result.path;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    vscode.window.showErrorMessage(
+      `Comment: Could not write revision file to ${revisionsDir}: ${msg}`,
+    );
+    return;
+  }
+
+  await vscode.env.clipboard.writeText(prompt);
+
+  vscode.window.showInformationMessage(
+    `Comments for ${path.basename(mdFilePath)} copied to clipboard and saved to ${path.relative(workspaceRoot, revisionPath)}`,
+  );
+}
+
+// ── comment.deleteFileComments ────────────────────────────────────────────────
+
+export async function deleteFileComments(item: { resourceUri: vscode.Uri }): Promise<void> {
+  const mdFilePath = item.resourceUri.fsPath;
+  const filename = path.basename(mdFilePath);
+
+  const answer = await vscode.window.showWarningMessage(
+    `Delete all comments in ${filename}?`,
+    { modal: true },
+    'Delete',
+  );
+
+  if (answer !== 'Delete') {
+    return;
+  }
+
+  await clearSidecar(getSidecarPath(mdFilePath));
+  await CommentPreviewPanel.refresh();
+
+  vscode.window.showInformationMessage(`Deleted all comments in ${filename}.`);
 }
 
 // ── comment.deleteAllComments ─────────────────────────────────────────────────

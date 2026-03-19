@@ -16,6 +16,7 @@ export class MarkdownItem extends vscode.TreeItem {
         arguments: [resourceUri],
       };
       this.iconPath = new vscode.ThemeIcon('markdown');
+      this.contextValue = 'markdownFile';
     }
     this.tooltip = resourceUri.fsPath;
   }

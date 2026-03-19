@@ -2,31 +2,42 @@
 
 Leave Google Docs-style inline comments on `.md` files, directly in VS Code.
 
-Highlight any text, type your note, and it sticks to that passage — without touching the document itself. When you're done annotating, copy all your comments as a structured AI prompt and paste into ChatGPT, Claude, Gemini, or any other tool to get a revised draft back.
+Highlight any text, type your note, and it sticks to that passage — without touching the document itself. When you're done annotating, copy all your comments as a structured AI prompt and paste into your coding agent to get a revised draft back.
 
 ---
 
 ## Install
 
-**VS Code**
+Works with VS Code, Cursor, Kiro, Windsurf, and any other VS Code-based IDE.
+
+**Option 1 — Terminal:**
+
+VS Code
 ```bash
 curl -L https://github.com/erayalan/comment/raw/main/comment-0.1.0.vsix -o /tmp/comment.vsix && code --install-extension /tmp/comment.vsix
 ```
 
-**Cursor**
+Cursor
 ```bash
 curl -L https://github.com/erayalan/comment/raw/main/comment-0.1.0.vsix -o /tmp/comment.vsix && cursor --install-extension /tmp/comment.vsix
 ```
 
-**Windsurf**
+Windsurf
 ```bash
 curl -L https://github.com/erayalan/comment/raw/main/comment-0.1.0.vsix -o /tmp/comment.vsix && windsurf --install-extension /tmp/comment.vsix
 ```
 
-**Kiro**
+Kiro
 ```bash
 curl -L https://github.com/erayalan/comment/raw/main/comment-0.1.0.vsix -o /tmp/comment.vsix && kiro --install-extension /tmp/comment.vsix
 ```
+
+**Option 2 — UI:**
+1. Download `comment-0.1.0.vsix`
+2. Open your IDE
+3. Press `Cmd+Shift+P` (Mac) or `Ctrl+Shift+P` (Windows/Linux)
+4. Type **"Extensions: Install from VSIX..."** and select it
+5. Navigate to the downloaded `.vsix` file and open it
 
 ---
 
@@ -34,9 +45,6 @@ curl -L https://github.com/erayalan/comment/raw/main/comment-0.1.0.vsix -o /tmp/
 
 ### Highlight text → type a comment
 Select any text in the preview. A cursor appears in the right gutter — start typing immediately. Click away to save.
-
-### Comments stay anchored
-Comments live in a right-side gutter, aligned to the highlighted passage. They scroll with the document and never overlap each other.
 
 ### Nothing touches your `.md` files
 Comments are stored in a hidden sidecar file (`.filename.comments.json`) next to each markdown file. Your document is never modified.
@@ -92,24 +100,6 @@ For real-time collaborative annotation, use [VS Code Live Share](https://marketp
 4. Comments are written to the host's sidecar files and are immediately visible to all participants in the session
 
 This requires one team member to be the active host. For async workflows (no live session), commit the `.comments.json` sidecar files to Git so teammates can pull and see each other's annotations.
-
----
-
-## Installation
-
-Works with VS Code, Cursor, Kiro, Windsurf, and any other VS Code-based IDE.
-
-**Option 1 — UI:**
-1. Download `comment-0.1.0.vsix`
-2. Open your IDE
-3. Press `Cmd+Shift+P` (Mac) or `Ctrl+Shift+P` (Windows/Linux)
-4. Type **"Extensions: Install from VSIX..."** and select it
-5. Navigate to the downloaded `.vsix` file and open it
-
-**Option 2 — Terminal:**
-```
-code --install-extension comment-0.1.0.vsix
-```
 
 ---
 

@@ -66,6 +66,16 @@
         "command": "comment.deleteRevision",
         "title": "Delete Revision",
         "icon": "$(trash)"
+      },
+      {
+        "command": "comment.copyFileComments",
+        "title": "Copy File Comments",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "comment.deleteFileComments",
+        "title": "Delete File Comments",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -74,6 +84,16 @@
           "command": "comment.deleteRevision",
           "when": "view == comment-revisions-tree && viewItem == revisionItem",
           "group": "inline"
+        },
+        {
+          "command": "comment.copyFileComments",
+          "when": "view == comment-file-tree && viewItem == markdownFile",
+          "group": "inline@1"
+        },
+        {
+          "command": "comment.deleteFileComments",
+          "when": "view == comment-file-tree && viewItem == markdownFile",
+          "group": "inline@2"
         }
       ],
       "view/title": [
