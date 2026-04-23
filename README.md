@@ -14,22 +14,22 @@ Works with VS Code, Cursor, Kiro, Windsurf, and any other VS Code-based IDE.
 
 VS Code
 ```bash
-curl -L https://github.com/erayalan/comment/raw/main/comment-0.1.0.vsix -o /tmp/comment.vsix && code --install-extension /tmp/comment.vsix
+curl -L https://github.com/erayalan/comment/releases/download/v0.1.0/comment-0.1.0.vsix -o /tmp/comment.vsix && code --install-extension /tmp/comment.vsix
 ```
 
 Cursor
 ```bash
-curl -L https://github.com/erayalan/comment/raw/main/comment-0.1.0.vsix -o /tmp/comment.vsix && cursor --install-extension /tmp/comment.vsix
+curl -L https://github.com/erayalan/comment/releases/download/v0.1.0/comment-0.1.0.vsix -o /tmp/comment.vsix && cursor --install-extension /tmp/comment.vsix
 ```
 
 Windsurf
 ```bash
-curl -L https://github.com/erayalan/comment/raw/main/comment-0.1.0.vsix -o /tmp/comment.vsix && windsurf --install-extension /tmp/comment.vsix
+curl -L https://github.com/erayalan/comment/releases/download/v0.1.0/comment-0.1.0.vsix -o /tmp/comment.vsix && windsurf --install-extension /tmp/comment.vsix
 ```
 
 Kiro
 ```bash
-curl -L https://github.com/erayalan/comment/raw/main/comment-0.1.0.vsix -o /tmp/comment.vsix && kiro --install-extension /tmp/comment.vsix
+curl -L https://github.com/erayalan/comment/releases/download/v0.1.0/comment-0.1.0.vsix -o /tmp/comment.vsix && kiro --install-extension /tmp/comment.vsix
 ```
 
 **Option 2 — UI:**
