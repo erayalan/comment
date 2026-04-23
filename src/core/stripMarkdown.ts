@@ -28,6 +28,33 @@ export function findInStrippedSource(
       atLineStart = false;
       continue;
     }
+    // Bulleted list markers (`-`, `+`) at line start. `*` is already consumed by
+    // the inline-marker rule below.
+    if (
+      atLineStart &&
+      (source[i] === '-' || source[i] === '+') &&
+      (source[i + 1] === ' ' || source[i + 1] === '\t')
+    ) {
+      i += 2;
+      while (i < source.length && (source[i] === ' ' || source[i] === '\t')) i++;
+      atLineStart = false;
+      continue;
+    }
+    // Numbered list markers at line start: `1.` / `23)` etc., followed by a space.
+    if (atLineStart && source[i] >= '0' && source[i] <= '9') {
+      let j = i;
+      while (j < source.length && source[j] >= '0' && source[j] <= '9') j++;
+      if (
+        j < source.length &&
+        (source[j] === '.' || source[j] === ')') &&
+        (source[j + 1] === ' ' || source[j + 1] === '\t')
+      ) {
+        i = j + 2;
+        while (i < source.length && (source[i] === ' ' || source[i] === '\t')) i++;
+        atLineStart = false;
+        continue;
+      }
+    }
     // Skip inline markdown markers: *, **, ***, `, ``, ```, ~~
     if (source[i] === '*' || source[i] === '`') {
       const ch = source[i];
