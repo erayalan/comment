@@ -120,17 +120,18 @@ function _processSelection(): void {
   // Reject selections that partially overlap an existing comment anchor mark.
   // Allow: selection fully inside a mark, or selection fully containing a mark.
   // Reject: selection that crosses a mark boundary from one side only.
+  //
+  // We compare against the mark's *content* range (selectNodeContents) so the
+  // boundary positions line up regardless of whether the range endpoints are
+  // given as (text-node, 0) or (parent, child-index).
   for (const mark of Array.from(preview.querySelectorAll('mark.comment-anchor'))) {
     if (!range.intersectsNode(mark)) continue;
-    const fullyInside = mark.contains(range.startContainer) && mark.contains(range.endContainer);
-    // Check if the selection fully contains the mark using standard compareBoundaryPoints.
-    // START_TO_START <= 0: our range starts at or before the mark's start.
-    // END_TO_END >= 0: our range ends at or after the mark's end.
     const markRange = document.createRange();
-    markRange.selectNode(mark);
+    markRange.selectNodeContents(mark);
     const cmpStart = range.compareBoundaryPoints(Range.START_TO_START, markRange);
     const cmpEnd = range.compareBoundaryPoints(Range.END_TO_END, markRange);
     const fullyContains = cmpStart <= 0 && cmpEnd >= 0;
+    const fullyInside = cmpStart >= 0 && cmpEnd <= 0;
     console.log('[comment] anchor overlap check', {
       markText: mark.textContent?.slice(0, 40),
       fullyInside,
@@ -174,45 +175,115 @@ function _processSelection(): void {
 }
 
 /**
- * Count how many times `text` appears in DOM text nodes within `#preview`
- * BEFORE the start of `range` (exclusive).
+ * Inline elements that are transparent to text matching — text inside or around
+ * them is considered a single logical run (mirrors _INLINE_TAGS in previewPanel).
+ */
+const _INLINE_TAGS = new Set([
+  'A', 'ABBR', 'B', 'BDI', 'CITE', 'CODE', 'DATA', 'DEL', 'DFN', 'EM',
+  'I', 'INS', 'KBD', 'MARK', 'Q', 'S', 'SAMP', 'SMALL', 'SPAN', 'STRONG',
+  'SUB', 'SUP', 'TIME', 'U', 'VAR', 'WBR',
+]);
+
+/**
+ * Count how many times `text` appears in the rendered DOM within `#preview`
+ * BEFORE the start of `range` (exclusive), matching with whitespace-insensitive
+ * semantics so selections that span inline tags, `<br>`, and block boundaries
+ * are counted consistently with how the host locates anchors in the source.
  */
 function _countOccurrencesBefore(text: string, range: Range): number {
   const preview = document.getElementById('preview');
   if (!preview) return 0;
 
-  let count = 0;
-  const walker = document.createTreeWalker(preview, NodeFilter.SHOW_TEXT);
+  // Build one flat virtualText covering the entire preview:
+  //   - Every character from TEXT nodes is appended (raw).
+  //   - <br> appends '\n' as a synthesized character.
+  //   - Any block-level element boundary appends ' '.
+  //   - Inline elements contribute nothing (transparent).
+  const walker = document.createTreeWalker(
+    preview,
+    NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
+  );
+  let virtualText = '';
+  let rawCutoff = -1; // index in virtualText where `range.startContainer` begins
 
-  let node = walker.nextNode();
-  while (node) {
-    if (node === range.startContainer) {
-      // Count occurrences in this node before the selection start offset
-      const textBefore = (node.textContent ?? '').slice(0, range.startOffset);
-      let pos = 0;
-      while (true) {
-        const idx = textBefore.indexOf(text, pos);
-        if (idx === -1) break;
-        count++;
-        pos = idx + 1;
+  let n = walker.nextNode();
+  while (n) {
+    if (n.nodeType === Node.ELEMENT_NODE) {
+      const tag = (n as Element).tagName;
+      if (tag === 'BR') {
+        virtualText += '\n';
+      } else if (!_INLINE_TAGS.has(tag) && virtualText.length > 0) {
+        virtualText += ' ';
       }
-      break;
+    } else {
+      const textNode = n as Text;
+      const raw = textNode.textContent ?? '';
+      if (textNode === range.startContainer && rawCutoff === -1) {
+        rawCutoff = virtualText.length + range.startOffset;
+      } else if (rawCutoff === -1 &&
+                 range.startContainer.nodeType === Node.ELEMENT_NODE &&
+                 range.startContainer.contains(textNode)) {
+        // Range start was given as (element, offset) — first contained text
+        // node at or after that offset marks the cutoff.
+        rawCutoff = virtualText.length;
+      }
+      virtualText += raw;
     }
-
-    // Count all occurrences in this node
-    const nodeText = node.textContent ?? '';
-    let pos = 0;
-    while (true) {
-      const idx = nodeText.indexOf(text, pos);
-      if (idx === -1) break;
-      count++;
-      pos = idx + 1;
-    }
-
-    node = walker.nextNode();
+    n = walker.nextNode();
   }
 
+  if (rawCutoff === -1) rawCutoff = virtualText.length;
+
+  // Normalize virtualText and the selection text identically, then count
+  // occurrences of the normalized selection text before the normalized cutoff.
+  const norm = _normalizeWhitespaceWithMap(virtualText);
+  const normText = _normalizeWhitespaceWithMap(text).normalized;
+  if (!normText) return 0;
+
+  let normCutoff = norm.normalized.length;
+  for (let i = 0; i < norm.map.length; i++) {
+    if (norm.map[i] >= rawCutoff) { normCutoff = i; break; }
+  }
+
+  const searchIn = norm.normalized.slice(0, normCutoff);
+  let count = 0;
+  let pos = 0;
+  while (true) {
+    const idx = searchIn.indexOf(normText, pos);
+    if (idx === -1) break;
+    count++;
+    pos = idx + 1;
+  }
   return count;
+}
+
+/**
+ * Collapse whitespace runs to a single space, strip leading/trailing whitespace,
+ * return normalized string + map from normalized index → original index.
+ */
+function _normalizeWhitespaceWithMap(s: string): { normalized: string; map: number[] } {
+  let normalized = '';
+  const map: number[] = [];
+  let prevWasSpace = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+      if (!prevWasSpace && normalized.length > 0) {
+        normalized += ' ';
+        map.push(i);
+        prevWasSpace = true;
+      }
+    } else {
+      normalized += c;
+      map.push(i);
+      prevWasSpace = false;
+    }
+  }
+  while (normalized.endsWith(' ')) {
+    normalized = normalized.slice(0, -1);
+    map.pop();
+  }
+  return { normalized, map };
 }
 
 // ── Message dispatcher ────────────────────────────────────────────────────────
@@ -296,27 +367,63 @@ function showCommentForm(msg: ShowCommentFormMessage): void {
   if (existing) existing.remove();
 
   // Full re-sort: collect all absolutely-positioned cards + the new form entry,
-  // sort by [anchorTop, anchorLeft] so same-line anchors appear left-to-right,
-  // then assign stacked positions. This correctly places the new form ABOVE any
-  // card whose anchor is to the right of the new selection on the same line.
-  interface SortEntry { el: HTMLElement | null; anchorTop: number; anchorLeft: number; height: number; }
+  // sort row-top → left → within-cell-top so same-row anchors appear left-to-right
+  // regardless of line-wrap variance within cells, then assign stacked positions.
+  interface SortEntry {
+    el: HTMLElement | null;
+    anchorTop: number;
+    anchorLeft: number;
+    anchorRowTop: number;
+    height: number;
+  }
   const entries: SortEntry[] = [];
 
   const positionedCards = (Array.from(gutter.querySelectorAll('.gutter-card')) as HTMLElement[])
     .filter((c) => c.style.position === 'absolute');
   for (const card of positionedCards) {
+    const anchorTop = parseFloat(card.dataset['anchorTop'] ?? '0') || 0;
     entries.push({
       el: card,
-      anchorTop: parseFloat(card.dataset['anchorTop'] ?? '0') || 0,
+      anchorTop,
       anchorLeft: parseFloat(card.dataset['anchorLeft'] ?? '0') || 0,
+      anchorRowTop: parseFloat(card.dataset['anchorRowTop'] ?? '') || anchorTop,
       height: card.getBoundingClientRect().height,
     });
   }
-  entries.push({ el: null, anchorTop: msg.rectTop, anchorLeft: msg.rectLeft, height: 24 });
+  // Prefer the draft anchor's live rect for positioning — more reliable than
+  // msg.rectTop for multi-block selections where `range.getClientRects()[0]`
+  // sometimes returns an unexpected rect.
+  const canvasEl = document.getElementById('canvas');
+  const scroll = canvasEl?.scrollTop ?? 0;
+  let newAnchorTop = msg.rectTop;
+  let newAnchorLeft = msg.rectLeft;
+  let newRowTop = msg.rectTop;
+  if (_draftAnchorSpan) {
+    const rects = _draftAnchorSpan.getClientRects();
+    const firstRect = rects[0] ?? _draftAnchorSpan.getBoundingClientRect();
+    if (firstRect.width > 0 || firstRect.height > 0) {
+      newAnchorTop = firstRect.top + scroll;
+      newAnchorLeft = firstRect.left;
+    }
+    const row = _draftAnchorSpan.closest('tr');
+    newRowTop = row
+      ? row.getBoundingClientRect().top + scroll
+      : newAnchorTop;
+  }
+  entries.push({
+    el: null,
+    anchorTop: newAnchorTop,
+    anchorLeft: newAnchorLeft,
+    anchorRowTop: newRowTop,
+    height: 24,
+  });
 
   entries.sort((a, b) => {
-    if (Math.abs(a.anchorTop - b.anchorTop) > 10) return a.anchorTop - b.anchorTop;
-    return a.anchorLeft - b.anchorLeft; // same line: left-to-right
+    const dyRow = a.anchorRowTop - b.anchorRowTop;
+    if (Math.abs(dyRow) > 2) return dyRow;
+    const dx = a.anchorLeft - b.anchorLeft;
+    if (Math.abs(dx) > 2) return dx;
+    return a.anchorTop - b.anchorTop;
   });
 
   let nextTop = 0;
@@ -410,17 +517,21 @@ function _renderGutter(comments: GutterComment[]): void {
   existingCards.forEach((c) => c.remove());
 
   // Compute actual DOM positions for non-orphaned comments
-  const positioned: Array<{ comment: GutterComment; top: number; left: number }> = [];
+  const positioned: Array<{ comment: GutterComment; top: number; left: number; rowTop: number }> = [];
   const orphaned: GutterComment[] = [];
 
   for (const comment of comments) {
     if (comment.isOrphaned || comment.rectTop === -1) {
       orphaned.push(comment);
     } else {
-      // Query the live DOM for the mark element's actual position
-      const mark = document.querySelector(
+      // Query the live DOM for the mark element's actual position. There may be
+      // multiple `<mark>` elements per comment-id if the anchor span was split
+      // across block boundaries (see _replaceNthTextOccurrence in previewPanel) —
+      // use the first one for positioning.
+      const marks = document.querySelectorAll(
         `[data-comment-id="${comment.id}"]`,
-      ) as HTMLElement | null;
+      );
+      const mark = marks[0] as HTMLElement | undefined;
       if (mark) {
         // Use first client rect to get the position of the first line of the mark,
         // which gives the correct top and left for multi-line highlights.
@@ -428,9 +539,17 @@ function _renderGutter(comments: GutterComment[]): void {
         // cards stay aligned with their marks regardless of scroll position.
         const firstRect = mark.getClientRects()[0] ?? mark.getBoundingClientRect();
         const canvasEl = document.getElementById('canvas');
-        const top = firstRect.top + (canvasEl?.scrollTop ?? 0);
+        const scroll = canvasEl?.scrollTop ?? 0;
+        const top = firstRect.top + scroll;
         const left = firstRect.left;
-        positioned.push({ comment, top, left });
+        // For anchors inside a table row, use the row's top as the grouping key
+        // so multiple cells on the same row sort top-left → bottom-right regardless
+        // of differing line-wrap within each cell.
+        const row = mark.closest('tr');
+        const rowTop = row
+          ? row.getBoundingClientRect().top + scroll
+          : top;
+        positioned.push({ comment, top, left, rowTop });
       } else {
         // Mark not found in DOM despite host saying it isn't orphaned — treat as orphaned
         orphaned.push({ ...comment, isOrphaned: true, rectTop: -1 });
@@ -438,18 +557,22 @@ function _renderGutter(comments: GutterComment[]): void {
     }
   }
 
-  // Sort by vertical position first; break ties left-to-right (same-line anchors).
+  // Sort row-top → cell-left → within-cell-top. Row top groups anchors that
+  // belong to the same table row (or same line of prose) even when their
+  // first-line tops differ by a few pixels due to line-wrap variance.
   positioned.sort((a, b) => {
-    const dy = a.top - b.top;
-    if (Math.abs(dy) > 2) return dy; // different lines (2 px tolerance for sub-pixel)
-    return a.left - b.left;          // same line: left-to-right
+    const dyRow = a.rowTop - b.rowTop;
+    if (Math.abs(dyRow) > 2) return dyRow;
+    const dx = a.left - b.left;
+    if (Math.abs(dx) > 2) return dx;
+    return a.top - b.top;
   });
 
   // Render positioned cards with collision avoidance so same-line cards stack vertically.
   let nextAvailableTop = 0;
-  for (const { comment, top, left } of positioned) {
+  for (const { comment, top, left, rowTop } of positioned) {
     const actualTop = Math.max(top, nextAvailableTop);
-    const card = _buildGutterCard(comment, actualTop, top, left);
+    const card = _buildGutterCard(comment, actualTop, top, left, rowTop);
     gutter.appendChild(card);
     // Measure rendered height synchronously (element is in DOM, position: absolute).
     nextAvailableTop = actualTop + card.getBoundingClientRect().height + 4;
@@ -457,7 +580,7 @@ function _renderGutter(comments: GutterComment[]): void {
 
   // Render orphaned cards at the bottom of the gutter
   for (const comment of orphaned) {
-    const card = _buildGutterCard(comment, -1, -1, 0);
+    const card = _buildGutterCard(comment, -1, -1, 0, -1);
     gutter.appendChild(card);
   }
 }
@@ -477,10 +600,15 @@ function _relayoutCardsAfter(aboveTopPx: number, newBottomPx: number): void {
   const cards = (Array.from(gutter.querySelectorAll('.gutter-card')) as HTMLElement[])
     .filter((c) => c.style.position === 'absolute' && (parseFloat(c.style.top) || 0) > aboveTopPx)
     .sort((a, b) => {
-      const aAnchorTop = parseFloat(a.dataset['anchorTop'] ?? '0') || 0;
-      const bAnchorTop = parseFloat(b.dataset['anchorTop'] ?? '0') || 0;
-      if (Math.abs(aAnchorTop - bAnchorTop) > 10) return aAnchorTop - bAnchorTop;
-      return (parseFloat(a.dataset['anchorLeft'] ?? '0') || 0) - (parseFloat(b.dataset['anchorLeft'] ?? '0') || 0);
+      const aRow = parseFloat(a.dataset['anchorRowTop'] ?? '') || parseFloat(a.dataset['anchorTop'] ?? '0') || 0;
+      const bRow = parseFloat(b.dataset['anchorRowTop'] ?? '') || parseFloat(b.dataset['anchorTop'] ?? '0') || 0;
+      if (Math.abs(aRow - bRow) > 2) return aRow - bRow;
+      const aLeft = parseFloat(a.dataset['anchorLeft'] ?? '0') || 0;
+      const bLeft = parseFloat(b.dataset['anchorLeft'] ?? '0') || 0;
+      if (Math.abs(aLeft - bLeft) > 2) return aLeft - bLeft;
+      const aTop = parseFloat(a.dataset['anchorTop'] ?? '0') || 0;
+      const bTop = parseFloat(b.dataset['anchorTop'] ?? '0') || 0;
+      return aTop - bTop;
     });
 
   let nextTop = newBottomPx;
@@ -499,12 +627,14 @@ function _buildGutterCard(
   top: number,
   anchorTop: number = top,
   anchorLeft: number = 0,
+  anchorRowTop: number = anchorTop,
 ): HTMLElement {
   const card = document.createElement('div');
   card.className = 'gutter-card';
   card.dataset['commentId'] = comment.id;
   card.dataset['anchorTop'] = String(anchorTop);
   card.dataset['anchorLeft'] = String(anchorLeft);
+  card.dataset['anchorRowTop'] = String(anchorRowTop);
 
   if (top >= 0) {
     card.style.position = 'absolute';

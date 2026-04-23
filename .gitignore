@@ -1,11 +1,31 @@
+# Dependencies & build output
 node_modules/
 out/
-# *.vsix
+*.vsix
+
+# Logs & OS files
 *.log
-.env*
 .DS_Store
 Thumbs.db
 *.tmp
 *.swp
-.comments/
+
+# Environment
+.env*
+
+# Editor / local config
+.vscode/settings.json
 .vscode-test/
+
+# Comment extension local data
+.comments/
+CommentRevisions/
+*.comments.json
+.*.comments.json
+
+# SpecKit / Claude dev tooling (not needed by end users)
+.claude/
+.specify/
+specs/
+CLAUDE.md
+BACKLOG.md

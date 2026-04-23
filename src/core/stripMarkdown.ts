@@ -42,6 +42,29 @@ export function findInStrippedSource(
       atLineStart = false;
       continue;
     }
+    // Treat <br>, <br/>, <br /> as a single whitespace — common in table cells
+    // to force a line break. Rendered selection includes '\n' for these.
+    if (source[i] === '<') {
+      const brMatch = /^<br\s*\/?>/i.exec(source.slice(i, i + 8));
+      if (brMatch) {
+        if (!prevWasSpace && normalized.length > 0) {
+          posMap.push(i);
+          normalized += ' ';
+          prevWasSpace = true;
+        }
+        i += brMatch[0].length;
+        atLineStart = false;
+        continue;
+      }
+    }
+    // Escaped punctuation: \X in markdown renders as X. Skip the backslash so
+    // the literal character is matched directly.
+    if (source[i] === '\\' && i + 1 < source.length) {
+      const next = source[i + 1];
+      if ('\\`*_{}[]()#+-.!|<>~"\'?:'.indexOf(next) !== -1) {
+        i++; // skip the backslash, emit the next char in the normal path below
+      }
+    }
     // Collapse any whitespace (space, tab, \r, \n) to a single space.
     if (source[i] === ' ' || source[i] === '\t' || source[i] === '\r' || source[i] === '\n') {
       if (source[i] === '\n') atLineStart = true;

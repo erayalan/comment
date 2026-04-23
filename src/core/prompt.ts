@@ -13,6 +13,9 @@ const PREAMBLE =
   'Please review all the comments below and make the ' +
   'necessary changes to the documents mentioned. Each comment is anchored to a specific text excerpt — ' +
   'use the anchor to locate the passage in the documents and apply the suggested edits. ' +
+  'If you identify any conflicts or contradictions in the direction of my comments, ' +
+  'do not attempt to resolve them silently — instead, highlight the conflict and ask me ' +
+  'open-ended questions so I can decide which direction to go. ' +
   'After reviewing all comments, return the revised document with all changes applied.' +
   '\n\n---\n\n';
 

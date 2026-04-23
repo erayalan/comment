@@ -20,7 +20,8 @@ export function getActiveFilePath(): string | undefined {
 
 // ── T010: renderMarkdown ──────────────────────────────────────────────────────
 
-const _md = new MarkdownIt({ html: false, linkify: true, typographer: true });
+// html: true — tables rely on `<br>` for intra-cell line breaks; source is the user's own markdown.
+const _md = new MarkdownIt({ html: true, linkify: true, typographer: true });
 
 export function renderMarkdown(mdSource: string): string {
   return _md.render(mdSource);
@@ -132,12 +133,9 @@ function _htmlTagName(tag: string): string {
 
 /**
  * Walk `html` as a token stream (text nodes + tags), matching `encodedText`
- * across inline-tag boundaries, and replace the `n`-th (0-based) occurrence
- * with a `<mark>` element.
- *
- * This handles the case where the selected text straddles inline elements
- * such as `<code>`, `<em>`, etc. — e.g. the rendered form of
- * ``1. `show_application_link` — note`` spans a `<code>` tag in HTML.
+ * with whitespace-insensitive semantics, and wrap the `n`-th (0-based)
+ * occurrence in a `<mark>` element. Block-level tags (and `<br>`) inside the
+ * match span close and reopen the mark so the resulting HTML stays valid.
  */
 function _replaceNthTextOccurrence(
   html: string,
@@ -147,7 +145,7 @@ function _replaceNthTextOccurrence(
 ): string {
   // ── 1. Tokenize ───────────────────────────────────────────────────────────
   interface TextToken { type: 'text'; raw: string }
-  interface TagToken  { type: 'tag';  raw: string; isInline: boolean }
+  interface TagToken  { type: 'tag';  raw: string; name: string; isInline: boolean; isBr: boolean }
   type Token = TextToken | TagToken;
 
   const tokens: Token[] = [];
@@ -156,12 +154,18 @@ function _replaceNthTextOccurrence(
     if (html[i] === '<') {
       const end = html.indexOf('>', i);
       if (end === -1) {
-        // Unclosed tag — treat rest as text
         tokens.push({ type: 'text', raw: html.slice(i) });
         break;
       }
       const raw = html.slice(i, end + 1);
-      tokens.push({ type: 'tag', raw, isInline: _INLINE_TAGS.has(_htmlTagName(raw)) });
+      const name = _htmlTagName(raw);
+      tokens.push({
+        type: 'tag',
+        raw,
+        name,
+        isInline: _INLINE_TAGS.has(name),
+        isBr: name === 'br',
+      });
       i = end + 1;
     } else {
       const end = html.indexOf('<', i);
@@ -171,96 +175,120 @@ function _replaceNthTextOccurrence(
     }
   }
 
-  // ── 2. Scan runs, find nth occurrence, inject mark ────────────────────────
-  // A "run" = consecutive text tokens separated only by inline tags. Block tags
-  // end the run. We build a virtual concatenation of text in the run and search
-  // for encodedText across token boundaries.
-
-  let count = 0;
-  let ti = 0; // index of first token in current run
-
-  while (ti < tokens.length) {
-    // Collect run starting at ti
-    let ri = ti;
-    let virtualText = '';
-    // posMap[vi] = { tokenIndex, charOffset } — maps virtual text pos → token char
-    const posMap: Array<{ tokenIndex: number; charOffset: number }> = [];
-
-    while (ri < tokens.length) {
-      const tok = tokens[ri];
-      if (tok.type === 'text') {
-        for (let ci = 0; ci < tok.raw.length; ci++) {
-          posMap.push({ tokenIndex: ri, charOffset: ci });
-          virtualText += tok.raw[ci];
-        }
-        ri++;
-      } else if (tok.isInline) {
-        ri++; // transparent: advances run without adding to virtualText
-      } else {
-        break; // block tag ends the run
+  // ── 2. Build virtualText + posMap covering the full document ─────────────
+  // charOffset = -1 marks a synthesized whitespace from a tag (not a real char).
+  let virtualText = '';
+  const posMap: Array<{ tokenIndex: number; charOffset: number }> = [];
+  for (let ti = 0; ti < tokens.length; ti++) {
+    const tok = tokens[ti];
+    if (tok.type === 'text') {
+      for (let ci = 0; ci < tok.raw.length; ci++) {
+        posMap.push({ tokenIndex: ti, charOffset: ci });
+        virtualText += tok.raw[ci];
       }
+    } else if (tok.isInline) {
+      // transparent — no char emitted
+    } else {
+      // block tag or <br> — emit a whitespace so adjacent text stays separable.
+      posMap.push({ tokenIndex: ti, charOffset: -1 });
+      virtualText += tok.isBr ? '\n' : ' ';
     }
-
-    // Search virtualText for encodedText
-    let from = 0;
-    while (virtualText.length - from >= encodedText.length) {
-      const idx = virtualText.indexOf(encodedText, from);
-      if (idx === -1) break;
-
-      if (count === n) {
-        // Found the target occurrence — inject <mark> at [idx, idx+len-1]
-        const startMap = posMap[idx];
-        const endMap   = posMap[idx + encodedText.length - 1];
-
-        let out = '';
-        // Tokens before this run
-        for (let t = 0; t < ti; t++) out += tokens[t].raw;
-
-        // Run tokens with mark injected
-        for (const { ti: t, token } of tokens
-          .slice(ti, ri)
-          .map((token, offset) => ({ ti: ti + offset, token }))
-        ) {
-          if (t < startMap.tokenIndex || t > endMap.tokenIndex) {
-            out += token.raw;
-          } else if (t === startMap.tokenIndex && t === endMap.tokenIndex) {
-            // Match is entirely within this text token
-            out += token.raw.slice(0, startMap.charOffset);
-            out += `<mark class="comment-anchor" data-comment-id="${commentId}">`;
-            out += token.raw.slice(startMap.charOffset, endMap.charOffset + 1);
-            out += '</mark>';
-            out += token.raw.slice(endMap.charOffset + 1);
-          } else if (t === startMap.tokenIndex) {
-            // Match starts here
-            out += token.raw.slice(0, startMap.charOffset);
-            out += `<mark class="comment-anchor" data-comment-id="${commentId}">`;
-            out += token.raw.slice(startMap.charOffset);
-          } else if (t === endMap.tokenIndex) {
-            // Match ends here
-            out += token.raw.slice(0, endMap.charOffset + 1);
-            out += '</mark>';
-            out += token.raw.slice(endMap.charOffset + 1);
-          } else {
-            // Middle of match span (inline tag or text token entirely inside span)
-            out += token.raw;
-          }
-        }
-
-        // Tokens after run
-        for (let t = ri; t < tokens.length; t++) out += tokens[t].raw;
-
-        return out;
-      }
-
-      count++;
-      from = idx + 1;
-    }
-
-    // Advance past this run (and the block tag that ended it, if any)
-    ti = ri >= tokens.length ? ri : ri + 1;
   }
 
-  return html; // no match found — return unchanged
+  // ── 3. Whitespace-insensitive match ──────────────────────────────────────
+  const norm = _normalizeWhitespace(virtualText);
+  const normEncoded = _normalizeWhitespace(encodedText).normalized;
+  if (!normEncoded) return html;
+
+  let count = 0;
+  let from = 0;
+  while (true) {
+    const idx = norm.normalized.indexOf(normEncoded, from);
+    if (idx === -1) return html;
+
+    if (count === n) {
+      const vStart = norm.map[idx];
+      const vEnd = norm.map[idx + normEncoded.length - 1];
+
+      // Shrink to the first/last real character (skip synthesized whitespace).
+      let sIdx = vStart;
+      while (sIdx <= vEnd && posMap[sIdx].charOffset === -1) sIdx++;
+      let eIdx = vEnd;
+      while (eIdx >= sIdx && posMap[eIdx].charOffset === -1) eIdx--;
+      if (sIdx > eIdx) return html;
+
+      const startMap = posMap[sIdx];
+      const endMap = posMap[eIdx];
+      const startTok = startMap.tokenIndex;
+      const endTok = endMap.tokenIndex;
+      const markOpen = `<mark class="comment-anchor" data-comment-id="${commentId}">`;
+      const markClose = '</mark>';
+
+      let out = '';
+      let inMark = false;
+      for (let t = 0; t < tokens.length; t++) {
+        const tok = tokens[t];
+        if (t < startTok || t > endTok) {
+          out += tok.raw;
+          continue;
+        }
+        if (tok.type === 'text') {
+          const isFirst = t === startTok;
+          const isLast = t === endTok;
+          const fromCh = isFirst ? startMap.charOffset : 0;
+          const toCh = isLast ? endMap.charOffset + 1 : tok.raw.length;
+          if (isFirst && fromCh > 0) out += tok.raw.slice(0, fromCh);
+          if (!inMark) { out += markOpen; inMark = true; }
+          out += tok.raw.slice(fromCh, toCh);
+          if (isLast) {
+            out += markClose;
+            inMark = false;
+            if (toCh < tok.raw.length) out += tok.raw.slice(toCh);
+          }
+        } else if (tok.isInline || tok.isBr) {
+          // Inline tags and <br> are phrasing content — safe inside <mark>.
+          out += tok.raw;
+        } else {
+          // Block-level tag inside the match — close mark, emit, reopen on next text.
+          if (inMark) { out += markClose; inMark = false; }
+          out += tok.raw;
+        }
+      }
+      if (inMark) out += markClose;
+      return out;
+    }
+    count++;
+    from = idx + 1;
+  }
+}
+
+/**
+ * Collapse whitespace runs to a single space, strip leading/trailing whitespace,
+ * and return a map from normalized index to original index.
+ */
+function _normalizeWhitespace(s: string): { normalized: string; map: number[] } {
+  let normalized = '';
+  const map: number[] = [];
+  let prevWasSpace = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+      if (!prevWasSpace && normalized.length > 0) {
+        normalized += ' ';
+        map.push(i);
+        prevWasSpace = true;
+      }
+    } else {
+      normalized += c;
+      map.push(i);
+      prevWasSpace = false;
+    }
+  }
+  while (normalized.endsWith(' ')) {
+    normalized = normalized.slice(0, -1);
+    map.pop();
+  }
+  return { normalized, map };
 }
 
 function _htmlEncode(str: string): string {
