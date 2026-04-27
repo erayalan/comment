@@ -33,6 +33,7 @@ export function buildWebviewHtml(
   nonce: string,
   bodyHtml: string,
   webviewCssUri: vscode.Uri,
+  githubMarkdownCssUri: vscode.Uri,
   webviewJsUri: vscode.Uri,
 ): string {
   return `<!DOCTYPE html>
@@ -42,12 +43,13 @@ export function buildWebviewHtml(
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src vscode-resource: https:;">
+  <link rel="stylesheet" nonce="${nonce}" href="${githubMarkdownCssUri}">
   <link rel="stylesheet" nonce="${nonce}" href="${webviewCssUri}">
   <title>Markdown Preview</title>
 </head>
 <body>
   <div id="canvas">
-    <div id="preview">${bodyHtml}</div>
+    <article id="preview" class="markdown-body">${bodyHtml}</article>
     <div id="gutter"></div>
   </div>
   <script nonce="${nonce}" src="${webviewJsUri}"></script>
@@ -618,13 +620,18 @@ export class CommentPreviewPanel {
         path.join(this._context.extensionPath, 'out', 'webview', 'styles.css'),
       ),
     );
+    const githubMarkdownCssUri = webview.asWebviewUri(
+      vscode.Uri.file(
+        path.join(this._context.extensionPath, 'out', 'webview', 'github-markdown.css'),
+      ),
+    );
     const jsUri = webview.asWebviewUri(
       vscode.Uri.file(
         path.join(this._context.extensionPath, 'out', 'webview', 'main.js'),
       ),
     );
 
-    webview.html = buildWebviewHtml(nonce, '', cssUri, jsUri);
+    webview.html = buildWebviewHtml(nonce, '', cssUri, githubMarkdownCssUri, jsUri);
   }
 
   private async _sendCurrentFile(): Promise<void> {

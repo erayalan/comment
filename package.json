@@ -121,6 +121,7 @@
     "publish": "vsce publish"
   },
   "dependencies": {
+    "github-markdown-css": "^5.9.0",
     "markdown-it": "^14.0.0",
     "node-html-parser": "^6.0.0",
     "uuid": "^9.0.0"

@@ -32,6 +32,10 @@ async function main() {
   if (fs.existsSync('src/webview/styles.css')) {
     fs.copyFileSync('src/webview/styles.css', 'out/webview/styles.css');
   }
+  fs.copyFileSync(
+    'node_modules/github-markdown-css/github-markdown.css',
+    'out/webview/github-markdown.css',
+  );
 
   if (watch) {
     const [ctx1, ctx2] = await Promise.all([
