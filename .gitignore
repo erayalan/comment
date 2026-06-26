@@ -1,7 +1,6 @@
 # Dependencies & build output
 node_modules/
 out/
-*.vsix
 
 # Logs & OS files
 *.log
